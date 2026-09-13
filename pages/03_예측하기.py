@@ -158,6 +158,25 @@ q1, q3 = errors["절대오차"].quantile([0.25, 0.75])
 threshold = q3 + 1.5 * (q3 - q1)
 candidates = errors[errors["절대오차"] > threshold].sort_values("절대오차", ascending=False)
 st.caption("훈련 영화 중 절대오차가 Q3 + 1.5 × IQR보다 큰 영화를 후보로 표시합니다. IQR은 가운데 50% 범위의 폭(Q3 − Q1)입니다. 후보라고 데이터 오류인 것은 아닙니다. 실제 흥행작도 있을 수 있습니다.")
+st.subheader("산점도에서 먼저 확인하기")
+errors["구분"] = errors["절대오차"].gt(threshold).map({True: "이상치 후보", False: "나머지 훈련 영화"})
+fig = px.scatter(errors, x="total_audi", y="예측", color="구분", symbol="구분",
+                 hover_name="movieNm", hover_data={"movieCd": True, "절대오차": ":,.0f", "total_audi": ":,.0f", "예측": ":,.0f"},
+                 labels={"total_audi": "실제 관측 누적관객(명)", "예측": "모델 예측 관객(명)", "movieCd": "영화 코드"},
+                 color_discrete_map={"이상치 후보": "#d95f02", "나머지 훈련 영화": "#2878b5"},
+                 symbol_map={"이상치 후보": "diamond", "나머지 훈련 영화": "circle"})
+low = min(0, errors["total_audi"].min(), errors["예측"].min())
+high = max(errors["total_audi"].max(), errors["예측"].max())
+padding = max((high - low) * 0.05, 1)
+fig.add_shape(type="line", x0=low, y0=low, x1=high, y1=high,
+              line={"color": "#666666", "dash": "dash"})
+fig.update_traces(marker={"size": 10, "opacity": 0.8})
+fig.update_xaxes(range=[low-padding, high+padding], tickformat=",")
+fig.update_yaxes(range=[low-padding, high+padding], tickformat=",")
+fig.update_layout(height=540, legend_title_text="훈련 영화", legend={"orientation": "h", "y": 1.12})
+st.plotly_chart(fig, key="outlier-review")
+st.caption("점선은 실젯값과 예측값이 같은 위치입니다. 점선 위는 크게, 아래는 작게 예측한 영화이며, 같은 실젯값에서 점선과의 세로 차이가 오차입니다. 주황색 마름모는 이상치 후보입니다.")
+st.info("점에 마우스를 올려 영화 이름·실젯값·예측값·절대오차를 확인하세요. 필요하면 드래그로 확대합니다. 다른 영화와 얼마나 떨어져 있는지와 실제 흥행작인지 살핀 뒤, 아래에서 제외 여부를 결정하세요.")
 st.dataframe(candidates.rename(columns={"movieNm": "영화", "total_audi": "관측 누적관객"}), hide_index=True)
 candidate_names = candidates.set_index("movieCd")["movieNm"].to_dict()
 excluded = st.multiselect("제외할 훈련 영화 · 선택하면 바로 재평가", candidates["movieCd"].tolist(),
@@ -204,95 +223,6 @@ def report_png(movie, prediction, baseline, evaluation, asof, cols, excluded_cou
                 lines.append(line); line = char
             else:
                 line += char
-        if line:
-            lines.append(line)
-        return lines
-    # 필름 프레임과 큰 활자. 제목은 줄바꿈해 긴 영화명도 담는다.
-    draw.rounded_rectangle((42, 42, 1038, 1308), radius=26, outline="#3d4a62", width=2)
-    draw.rounded_rectangle((72, 75, 385, 127), radius=26, fill=accent)
-    write("NEXT SCENE / 07", (91, 86), 25, "#10192b")
-    write(f"DATA {asof:%Y.%m.%d}", (720, 90), 24, muted)
-    write("이 영화, 어디까지 갈까?", (76, 163), 39)
-    title_size = 65
-    while title_size > 24 and len(wrap(movie["movieNm"], 914, title_size)) > 3:
-        title_size -= 2
-    y = 231
-    for line in wrap(movie["movieNm"], 914, title_size):
-        write(line, (76, y), title_size)
-        y += title_size + 12
-    write(f"개봉 {movie['개봉일']:%Y.%m.%d}  ·  {movie['watchGrade']}", (77, 476), 25, muted)
-    draw.line((76, 533, 1004, 533), fill="#3d4a62", width=2)
-    write("관객 예측", (76, 571), 29, muted)
-    number = f"{prediction / 10000:,.1f}만 명"
-    size = 108
-    while draw.textlength(number, font=font(size)) > 922 and size > 30:
-        size -= 2
-    write(number, (70, 626), size, accent)
-    write("실제 집계가 아닌 모델의 추정", (77, 769), 26, muted)
-    write(f"기본 속성 모델  {baseline / 10000:,.1f}만 명", (77, 828), 28)
-    write(f"테스트 R²  {evaluation['R²']:.3f}", (77, 883), 28)
-    write(f"테스트 MAE  {evaluation['MAE(명)'] / 10000:,.1f}만 명", (540, 883), 28)
-    write(f"입력 {len(cols)}개 · 훈련 {excluded_count}편 제외 후 재평가", (77, 944), 25, muted)
-    draw.line((76, 1004, 1004, 1004), fill="#3d4a62", width=2)
-    write(f"첫 관측 {movie['첫 관측일']:%Y.%m.%d}  ·  카드 작성 {datetime.now(ZoneInfo('Asia/Seoul')):%Y.%m.%d}", (77, 1041), 24)
-    notes = ["선택 영화는 학습·평가에서 제외한 학습용 예측입니다.",
-             "과거 작품의 마지막 관측 누적관객을 학습했으며,", "최종 관객 수를 보장하지 않습니다.",
-             "데이터: 영화진흥위원회 KOBIS · 정리: 모두의 데이터분석"]
-    for i, line in enumerate(notes):
-        write(line, (77, 1097 + i * 37), 23, muted)
-    output = BytesIO()
-    image.save(output, format="PNG")
-    return output.getvalue()
-
-
-st.header("4. 이 영화, 어디까지 갈까?")
-st.caption("데이터 기준일로부터 최근 30일 안에 개봉했고, 필요한 속성이 있는 영화입니다. 박스오피스 10위권 관측 목록이므로 전체 개봉작 목록은 아닙니다.")
-if recent.empty:
-    st.info("최근 30일 안에 선택할 수 있는 영화가 없습니다. 데이터 갱신 후 다시 확인하세요.")
-    st.stop()
-by_code = recent.set_index("movieCd", drop=False)
-selected = st.selectbox("최근 개봉작 선택", recent["movieCd"].tolist(), index=None, placeholder="영화 이름을 선택하세요",
-                        format_func=lambda code: f"{by_code.loc[code, 'movieNm']} · {by_code.loc[code, '개봉일']:%Y.%m.%d}")
-if selected is None:
-    st.info("영화를 선택하면 입력 데이터와 예측 카드가 나타납니다.")
-    st.stop()
-movie = by_code.loc[selected]
-mine = recent.loc[recent["movieCd"] == selected, cols]
-prediction = float(model.predict(mine)[0])
-base_model, _, _ = score(active_train, test, BASE)
-baseline = float(base_model.predict(recent.loc[recent["movieCd"] == selected, BASE])[0])
-st.subheader(movie["movieNm"])
-st.caption(f"개봉일 {movie['개봉일']:%Y.%m.%d} · 입력의 첫 관측일 {movie['첫 관측일']:%Y.%m.%d} · 최근 관측일 {movie['마지막 관측일']:%Y.%m.%d}")
-with st.expander("자동으로 불러온 입력 데이터", expanded=True):
-    st.dataframe(pd.DataFrame({"속성": [LABELS[c] for c in cols], "값": [float(movie[c]) for c in cols]}), hide_index=True)
-    st.caption(f"상영시간 {movie['showTm']:g}분 · 배우 {movie['actors_n']:g}명 · 주연 {movie['lead_n']:g}명 · {movie['watchGrade']} · {movie['company']}")
-first, second = st.columns(2)
-first.metric("선택 속성 모델의 관객 예측", f"{prediction:,.0f}명")
-second.metric("기본 세 가지 모델의 관객 예측", f"{baseline:,.0f}명")
-st.caption(f"참고 집계: {movie['마지막 관측일']:%Y.%m.%d}까지 {movie['관측 누적관객']:,.0f}명. 이 값은 입력에 넣지 않았습니다.")
-outside = [LABELS[c] for c in cols if movie[c] < active_train[c].min() or movie[c] > active_train[c].max()]
-if outside:
-    st.warning("훈련 데이터 범위 밖의 입력: " + ", ".join(outside) + ". 이 영화는 공유 카드보다 입력과 가중치를 먼저 살펴보세요.")
-if prediction < movie["관측 누적관객"] or prediction < 0 or baseline < 0:
-    st.warning("예측이 이미 관측된 관객 수보다 작거나 음수입니다. 값을 임의로 올리지 않고 그대로 표시합니다. 이 경우 공유 카드 생성을 보류합니다.")
-elif outside:
-    st.info("학습 범위 밖의 예측이므로 공유 카드 생성을 보류했습니다.")
-else:
-    try:
-        card = report_png(movie, prediction, baseline, test_score, asof, cols, len(excluded), fetch(FONT_URL))
-        st.image(card, caption="1080 × 1350 PNG · 공유 전 예측 기준과 숫자를 확인하세요", width=540)
-        st.download_button("예측 카드 PNG 저장", card, file_name=f"next-scene-{selected}-{asof:%Y%m%d}.png", mime="image/png", key="card-download")
-    except Exception:
-        st.warning("카드용 한글 글꼴을 불러오지 못했습니다. 예측값은 위에서 확인하고, 잠시 뒤 다시 카드 저장을 시도하세요.")
-with st.expander("함께 올릴 설명"):
-    caption = (f"이 영화, 어디까지 갈까? 🎬 {movie['movieNm']}\n"
-               f"관객 예측 {prediction:,.0f}명 | 데이터 기준 {asof:%Y.%m.%d}\n"
-               f"사용한 속성: {', '.join(LABELS[c] for c in cols)}\n"
-               f"훈련 영화 {len(excluded)}편 제외 후 재평가 | 테스트 R² {test_score['R²']:.3f}\n"
-               "실제 집계나 개봉 전 전망이 아닌, 개봉 후 관측 속성으로 만든 학습용 추정입니다.\n"
-               "출처: 영화진흥위원회 KOBIS / 모두의 데이터분석\n#NEXTSCENE #데이터과학 #영화예측")
-    st.code(caption, language=None)
-    st.download_button("설명 TXT 저장", caption, file_name=f"next-scene-{selected}.txt", mime="text/plain")
         if line:
             lines.append(line)
         return lines
