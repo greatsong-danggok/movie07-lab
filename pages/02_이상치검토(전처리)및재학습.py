@@ -202,27 +202,3 @@ st.caption(f"훈련 영화 {len(excluded)}편 제외 · 테스트 {len(test)}편
 if excluded:
     st.write("제외한 영화: " + ", ".join(candidate_names[code] for code in excluded))
 st.caption("테스트 결과를 반복해서 보고 제외 대상을 고른 점수는 탐색 결과입니다. 실제 성능을 확정하려면 별도의 새 데이터로 다시 확인합니다.")
-candidate_names = candidates.set_index("movieCd")["movieNm"].to_dict()
-excluded = st.multiselect("제외할 훈련 영화 · 선택하면 바로 재평가", candidates["movieCd"].tolist(),
-                         format_func=lambda code: candidate_names[code], key="excluded-movies")
-active_train = train[~train["movieCd"].isin(excluded)].copy()
-if len(active_train) < 20:
-    st.error("제외 후 훈련 영화가 20편 미만입니다. 제외할 영화를 줄여 주세요.")
-    st.stop()
-before_train, before_test = train_score, test_score
-model, train_score, test_score = score(active_train, test, cols)
-recheck = pd.DataFrame([
-    {"단계": "제외 전", "데이터": "훈련용", **before_train},
-    {"단계": "제외 전", "데이터": "테스트용", **before_test},
-    {"단계": "제외 후", "데이터": "훈련용", **train_score},
-    {"단계": "제외 후", "데이터": "테스트용", **test_score},
-])
-st.dataframe(recheck.style.format({"R²": "{:.3f}", "MAE(명)": "{:,.0f}"}), hide_index=True)
-a, b = st.columns(2)
-a.metric("재평가 테스트 R²", f"{test_score['R²']:.3f}", f"{test_score['R²']-before_test['R²']:+.3f}")
-b.metric("재평가 테스트 MAE", f"{test_score['MAE(명)']:,.0f}명",
-         f"{test_score['MAE(명)']-before_test['MAE(명)']:+,.0f}명", delta_color="inverse")
-st.caption(f"훈련 영화 {len(excluded)}편 제외 · 테스트 {len(test)}편은 그대로입니다. 후보를 선택하지 않으면 원래 모델을 유지합니다. 아래 예측과 카드는 이 재평가 모델을 사용합니다.")
-if excluded:
-    st.write("제외한 영화: " + ", ".join(candidate_names[code] for code in excluded))
-st.caption("테스트 결과를 반복해서 보고 제외 대상을 고른 점수는 탐색 결과입니다. 실제 성능을 확정하려면 별도의 새 데이터로 다시 확인합니다.")
